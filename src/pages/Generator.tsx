@@ -11,9 +11,6 @@ import ConfirmedClassesStep from '@/components/features/ConfirmedClassesStep';
 import ReviewStep from '@/components/features/ReviewStep';
 import { ArrowLeft, ArrowRight, RotateCcw, Sparkles } from 'lucide-react';
 
-// Sound effect for generate button
-const generateSound = new Audio('/faaah.mp3');
-
 const STEPS = [GeneralConfigStep, BranchesStep, LabsStep, SubjectsStep, CombinedClassStep, ConfirmedClassesStep, ReviewStep];
 
 export default function Generator() {
@@ -36,12 +33,10 @@ export default function Generator() {
   function handleBack() { if (currentStep > 0) setCurrentStep(currentStep - 1); }
 
   function handleGenerate() {
-    generate();
-    generateSound.currentTime = 0;
-    generateSound.play().catch(() => {});
-    toast({ title: 'Timetable forged!', description: 'Redirecting to view...', variant: 'success' });
-    navigate('/timetable');
-  }
+     generate();
+     toast({ title: 'Timetable forged!', description: 'Redirecting to view...', variant: 'success' });
+     navigate('/timetable');
+   }
 
   function handleReset() { resetWizard(); toast({ title: 'Forge reset', variant: 'default' }); }
 

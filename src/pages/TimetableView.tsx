@@ -16,9 +16,6 @@ import {
   FlaskConical, Pencil, Pin,
 } from 'lucide-react';
 
-// Sound effect for regenerate button
-const generateSound = new Audio('/faaah.mp3');
-
 const VIEW_MODES: { key: ViewMode; label: string; icon: typeof GitBranch }[] = [
   { key: 'branch', label: 'Branch', icon: GitBranch },
   { key: 'teacher', label: 'Teacher', icon: User },
@@ -72,7 +69,7 @@ export default function TimetableView() {
   const currentGrid = generatedTimetables[activeBranch];
   const currentBranch = branches.find((b) => b.id === activeBranch);
 
-  function handleRegenerate() { generate(); generateSound.currentTime = 0; generateSound.play().catch(() => {}); toast({ title: 'Timetable re-forged! Confirmed classes preserved.', variant: 'success' }); }
+  function handleRegenerate() { generate(); toast({ title: 'Timetable re-forged! Confirmed classes preserved.', variant: 'success' }); }
   async function handleSave() { 
     const name = saveName.trim() || `Timetable — ${new Date().toLocaleDateString()}`; 
     await saveCurrent(name); 
