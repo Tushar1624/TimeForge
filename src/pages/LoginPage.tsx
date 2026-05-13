@@ -79,9 +79,12 @@ export default function LoginPage() {
     setError('');
 
     const { error: signUpError, data } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+       email,
+       password,
+       options: {
+         redirectTo: `${window.location.origin}/login`,
+       },
+     });
 
     if (signUpError) {
       setError(signUpError.message);
