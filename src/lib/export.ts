@@ -1,5 +1,7 @@
 import type { TimetableCell, GeneralConfig, Branch } from '@/types';
 import { parseTime, formatTime } from '@/lib/utils';
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 function calculateTimeSlots(config: GeneralConfig) {
   const slots: { start: string; end: string }[] = [];
@@ -20,101 +22,180 @@ export function exportExcel(
   branches: Branch[],
   config: GeneralConfig
 ) {
+  const workbook = XLSX.utils.book_new();
   const timeSlots = calculateTimeSlots(config);
-  const numDays = config.workingDays.length;
-  const numPeriods = config.periodsPerDay;
-
-  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-    <head><meta charset="utf-8"/>
-    <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>`;
-
-  for (const branch of branches) {
-    html += `<x:ExcelWorksheet><x:Name>${branch.shortName}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>`;
-  }
-  html += `<x:ExcelWorksheet><x:Name>All Departments</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>`;
-  html += `</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
-    <style>
-      table{border-collapse:collapse}
-      td,th{border:1px solid #333;padding:6px 10px;font-family:Calibri,sans-serif;font-size:11pt;text-align:center}
-      th{background:#1a3a4a;color:white;font-weight:bold}
-      .recess{background:#FFF3CD;font-weight:bold;color:#856404}
-      .lab{background:#E0F2FE}
-      .combined{background:#FEF3C7}
-      .empty{background:#F9FAFB;color:#9CA3AF}
-      .header{font-size:14pt;font-weight:bold;padding:8px}
-    </style></head><body>`;
 
   for (const branch of branches) {
     const grid = timetables[branch.id];
     if (!grid) continue;
-    html += `<div id="${branch.shortName}"><table>`;
-    html += `<tr><td colspan="${numPeriods + 2}" class="header">${branch.name} (${branch.shortName}) — Timetable</td></tr>`;
-    html += `<tr><th>Day</th>`;
-    for (let p = 0; p < numPeriods; p++) {
-      if (p === config.recessAfterPeriod) html += `<th class="recess">Recess</th>`;
-      html += `<th>P${p + 1}<br/>${timeSlots[p]?.start}—${timeSlots[p]?.end}</th>`;
+
+    const data: any[][] = [];
+
+    // Title
+    data.push([`${branch.name} (${branch.shortName}) Timetable`]);
+    data.push([]);
+
+    // Header
+    const header: any[] = ["Day"];
+
+    for (let p = 0; p < config.periodsPerDay; p++) {
+      if (p === config.recessAfterPeriod) {
+        header.push("Recess");
+      }
+
+      header.push(
+        `P${p + 1}\n${timeSlots[p].start}-${timeSlots[p].end}`
+      );
     }
-    html += `</tr>`;
-    for (let d = 0; d < numDays; d++) {
-      html += `<tr><td><b>${config.workingDays[d]}</b></td>`;
-      for (let p = 0; p < numPeriods; p++) {
-        if (p === config.recessAfterPeriod) html += `<td class="recess"></td>`;
+
+    data.push(header);
+
+    // Rows
+    for (let d = 0; d < config.workingDays.length; d++) {
+      const row: any[] = [];
+
+      row.push(config.workingDays[d]);
+
+      for (let p = 0; p < config.periodsPerDay; p++) {
+        if (p === config.recessAfterPeriod) {
+          row.push("Recess");
+        }
+
         const cell = grid[d]?.[p];
-        if (!cell) { html += `<td class="empty">—</td>`; }
-        else if (cell.isLabContinuation) { continue; }
-        else {
-          const colspan = cell.isLab ? 2 : 1;
-          const cls = cell.isLab ? 'lab' : cell.isCombined ? 'combined' : '';
-          const extra = cell.isLab ? ' [LAB]' : cell.isCombined ? ` [${cell.combinedBranches.join('+')}]` : '';
-          const labInfo = cell.labRoomShortName ? ` (${cell.labRoomShortName})` : '';
-          html += `<td colspan="${colspan}" class="${cls}"><b>${cell.subjectShortName}</b>${extra}${labInfo}<br/>${cell.teacherName}</td>`;
+
+        if (!cell) {
+          row.push("");
+        } else if (cell.isLabContinuation) {
+          continue;
+        } else {
+          let value = cell.subjectShortName;
+
+          if (cell.teacherName) {
+            value += `\n${cell.teacherName}`;
+          }
+
+          if (cell.labRoomShortName) {
+            value += `\n${cell.labRoomShortName}`;
+          }
+
+          row.push(value);
         }
       }
-      html += `</tr>`;
+
+      data.push(row);
     }
-    html += `</table><br/></div>`;
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+
+    ws["!cols"] = [
+      { wch: 15 },
+      ...Array(header.length - 1).fill({ wch: 25 })
+    ];
+
+    // Add this branch's worksheet
+    XLSX.utils.book_append_sheet(
+      workbook,
+      ws,
+      branch.shortName.substring(0, 31) // Excel sheet name limit
+    );
   }
 
-  // All departments
-  html += `<div id="All Departments"><table>`;
-  html += `<tr><td colspan="${2 + numPeriods}" class="header">All Departments — Master Timetable</td></tr>`;
-  html += `<tr><th>Day</th><th>Branch</th>`;
-  for (let p = 0; p < numPeriods; p++) {
-    if (p === config.recessAfterPeriod) html += `<th class="recess">R</th>`;
-    html += `<th>P${p + 1}<br/>${timeSlots[p]?.start}—${timeSlots[p]?.end}</th>`;
+const master: any[][] = [];
+
+// Title
+master.push(["All Departments - Master Timetable"]);
+master.push([]);
+
+// Header
+const masterHeader: any[] = ["Day", "Branch"];
+
+for (let p = 0; p < config.periodsPerDay; p++) {
+  if (p === config.recessAfterPeriod) {
+    masterHeader.push("Recess");
   }
-  html += `</tr>`;
-  for (let d = 0; d < numDays; d++) {
-    for (let bIdx = 0; bIdx < branches.length; bIdx++) {
-      const branch = branches[bIdx];
-      html += `<tr>`;
-      if (bIdx === 0) html += `<td rowspan="${branches.length}"><b>${config.workingDays[d]}</b></td>`;
-      html += `<td><b>${branch.shortName}</b></td>`;
-      for (let p = 0; p < numPeriods; p++) {
-        if (p === config.recessAfterPeriod) html += `<td class="recess"></td>`;
-        const cell = timetables[branch.id]?.[d]?.[p];
-        if (!cell) { html += `<td class="empty">—</td>`; }
-        else if (cell.isLabContinuation) { continue; }
-        else {
-          const colspan = cell.isLab ? 2 : 1;
-          const cls = cell.isLab ? 'lab' : cell.isCombined ? 'combined' : '';
-          html += `<td colspan="${colspan}" class="${cls}"><b>${cell.subjectShortName}</b><br/>${cell.teacherName}</td>`;
-        }
+
+  masterHeader.push(
+    `P${p + 1}\n${timeSlots[p].start}-${timeSlots[p].end}`
+  );
+}
+
+master.push(masterHeader);
+
+// Data
+for (let d = 0; d < config.workingDays.length; d++) {
+
+  for (const branch of branches) {
+
+    const grid = timetables[branch.id];
+
+    if (!grid) continue;
+
+    const row: any[] = [];
+
+    row.push(config.workingDays[d]);
+    row.push(branch.shortName);
+
+    for (let p = 0; p < config.periodsPerDay; p++) {
+
+      if (p === config.recessAfterPeriod) {
+        row.push("Recess");
       }
-      html += `</tr>`;
-    }
-  }
-  html += `</table></div></body></html>`;
 
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `Timetable_${new Date().toISOString().slice(0, 10)}.xls`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+      const cell = grid[d]?.[p];
+
+      if (!cell) {
+        row.push("");
+      }
+      else if (cell.isLabContinuation) {
+        continue;
+      }
+      else {
+
+        let value = cell.subjectShortName;
+
+        if (cell.teacherName) {
+          value += `\n${cell.teacherName}`;
+        }
+
+        if (cell.labRoomShortName) {
+          value += `\n${cell.labRoomShortName}`;
+        }
+
+        row.push(value);
+      }
+    }
+
+    master.push(row);
+  }
+}
+
+const masterSheet = XLSX.utils.aoa_to_sheet(master);
+
+masterSheet["!cols"] = [
+  { wch: 15 },
+  { wch: 12 },
+  ...Array(masterHeader.length - 2).fill({ wch: 25 })
+];
+
+XLSX.utils.book_append_sheet(
+  workbook,
+  masterSheet,
+  "All Departments"
+);
+
+  // Export workbook
+  const excelBuffer = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+
+  saveAs(
+    new Blob([excelBuffer], {
+      type:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    `Timetable_${new Date().toISOString().slice(0, 10)}.xlsx`
+  );
 }
 
 export function extractTeachers(
