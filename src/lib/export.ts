@@ -70,15 +70,17 @@ export function exportExcel(
         } else {
           let value = cell.subjectShortName;
 
-          if (cell.teacherName) {
-            value += `\n${cell.teacherName}`;
-          }
+// Show teacher beside subject in ()
+if (cell.teacherName) {
+  value += ` (${cell.teacherName})`;
+}
 
-          if (cell.labRoomShortName) {
-            value += `\n${cell.labRoomShortName}`;
-          }
+// Show lab room on next line
+if (cell.labRoomShortName) {
+  value += `\n${cell.labRoomShortName}`;
+}
 
-          row.push(value);
+row.push(value);
         }
       }
 
@@ -153,15 +155,17 @@ for (let d = 0; d < config.workingDays.length; d++) {
 
         let value = cell.subjectShortName;
 
-        if (cell.teacherName) {
-          value += `\n${cell.teacherName}`;
-        }
+// Show teacher beside subject in ()
+if (cell.teacherName) {
+  value += ` (${cell.teacherName})`;
+}
 
-        if (cell.labRoomShortName) {
-          value += `\n${cell.labRoomShortName}`;
-        }
+// Show lab room on next line
+if (cell.labRoomShortName) {
+  value += `\n${cell.labRoomShortName}`;
+}
 
-        row.push(value);
+row.push(value);
       }
     }
 
