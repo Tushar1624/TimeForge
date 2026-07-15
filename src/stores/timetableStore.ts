@@ -9,6 +9,7 @@ import type {
   SavedTimetable,
   LabRoom,
   ConfirmedClass,
+  RemainingSubject, // <-- Added import
 } from '@/types';
 import { DEFAULT_CONFIG } from '@/constants/config';
 import { generateTimetables } from '@/lib/generator';
@@ -79,7 +80,13 @@ interface TimetableStore {
     period2: number
   ) => void;
   updateTimetables: (timetables: GridSnapshot) => void;
+  updateClass: (branchId: string,day: number,period: number,updates: Partial<TimetableCell>,duration: 1 | 2) => void;
   editInputs: () => void;
+
+  // --- NEW METHODS FOR MANUAL ASSIGNMENT ---
+  getRemainingSubjects: (branchId: string) => RemainingSubject[];
+  assignSubject: (branchId: string, day: number, period: number, subject: RemainingSubject, labRoomName?: string, labRoomShortName?: string) => void;
+  removeManualSubject: (branchId: string, day: number, period: number) => void;
 }
 
 const MAX_HISTORY = 50;
@@ -386,7 +393,217 @@ export const useTimetableStore = create<TimetableStore>()(
         set({ generatedTimetables: grids });
       },
 
-      updateTimetables: (timetables) => set({ generatedTimetables: timetables }),
+      updateTimetables: (timetables) =>
+        set({ generatedTimetables: timetables }),
+
+      updateClass: (branchId, day, period, updates, duration) => {
+          const state = get();
+          const grid = cloneGrids(state.generatedTimetables);
+          const current = grid[branchId]?.[day]?.[period];
+
+          if (!current) return;
+          if (current.isConfirmed) return;
+
+          state.pushHistory();
+
+          // Update current cell
+          const edited: TimetableCell = {
+              ...current,
+              ...updates,
+              duration,
+              isLab: duration === 2,
+              isLabContinuation: false,
+          };
+
+          grid[branchId][day][period] = edited;
+
+          // ---------------------------------------
+          // 1 PERIOD → 2 PERIODS
+          // ---------------------------------------
+          if (duration === 2) {
+              const nextPeriod = period + 1;
+
+              if (nextPeriod >= grid[branchId][day].length) {
+                  set({ generatedTimetables: grid });
+                  return;
+              }
+
+              const existing = grid[branchId][day][nextPeriod];
+              if (existing) {
+                  if (existing.isLabContinuation && nextPeriod > 0) {
+                      grid[branchId][day][nextPeriod - 1] = null;
+                  }
+                  if (existing.duration === 2 && !existing.isLabContinuation) {
+                      if (nextPeriod + 1 < grid[branchId][day].length) {
+                          grid[branchId][day][nextPeriod + 1] = null;
+                      }
+                  }
+                  grid[branchId][day][nextPeriod] = null;
+              }
+
+              grid[branchId][day][period] = {
+                  ...edited,
+                  duration: 2,
+                  isLabContinuation: false,
+              };
+
+              grid[branchId][day][nextPeriod] = {
+                  ...edited,
+                  duration: 2,
+                  isLabContinuation: true,
+              };
+          }
+          // ---------------------------------------
+          // 2 PERIODS → 1 PERIOD
+          // ---------------------------------------
+          else {
+              grid[branchId][day][period] = {
+                  ...edited,
+                  duration: 1,
+                  isLabContinuation: false,
+              };
+
+              if (
+                  period + 1 < grid[branchId][day].length &&
+                  grid[branchId][day][period + 1]?.isLabContinuation
+              ) {
+                  grid[branchId][day][period + 1] = null;
+              }
+          }
+
+          set({ generatedTimetables: grid });
+      },
+
+      // --- NEW IMPLEMENTATIONS FOR MANUAL ASSIGNMENT ---
+
+      getRemainingSubjects: (branchId) => {
+        const state = get();
+        const branchSubjects = state.subjects.filter((s) => s.branchIds.includes(branchId));
+        const grid = state.generatedTimetables[branchId];
+        
+        if (!grid) return [];
+
+        const counts: Record<string, { theory: number; practical: number }> = {};
+        branchSubjects.forEach((s) => {
+          counts[s.name] = { theory: 0, practical: 0 };
+        });
+
+        // Tally up assigned subjects
+        for (let d = 0; d < grid.length; d++) {
+          for (let p = 0; p < grid[d].length; p++) {
+            const cell = grid[d][p];
+            if (cell && !cell.isLabContinuation && counts[cell.subjectName]) {
+              if (cell.duration === 2 || cell.isLab) {
+                counts[cell.subjectName].practical += 1;
+              } else {
+                counts[cell.subjectName].theory += 1;
+              }
+            }
+          }
+        }
+
+        const remaining: RemainingSubject[] = [];
+        
+        // Calculate remaining and generate UI objects
+        branchSubjects.forEach((s) => {
+          const c = counts[s.name];
+          const theoryRem = s.theoryPerWeek - c.theory;
+          const pracRem = s.practicalPerWeek - c.practical;
+
+          if ((s.mode === 'theory' || s.mode === 'both') && theoryRem > 0) {
+            remaining.push({
+              id: `${s.id}-theory`,
+              subjectName: s.name,
+              subjectShortName: s.shortName,
+              teacherName: s.teacherName,
+              duration: 1,
+              isLab: false,
+              remaining: theoryRem,
+            });
+          }
+          if ((s.mode === 'practical' || s.mode === 'both') && pracRem > 0) {
+            remaining.push({
+              id: `${s.id}-practical`,
+              subjectName: s.name,
+              subjectShortName: s.shortName,
+              teacherName: s.teacherName,
+              duration: 2,
+              isLab: true,
+              preferredLabType: s.preferredLabType,
+              remaining: pracRem,
+            });
+          }
+        });
+        
+        return remaining;
+      },
+
+      assignSubject: (branchId, day, period, subject, labRoomName, labRoomShortName) => {
+        const state = get();
+        const grid = cloneGrids(state.generatedTimetables);
+        if (!grid[branchId]) return;
+
+        // Push state to support undo/redo
+        state.pushHistory();
+
+        const branch = state.branches.find((b) => b.id === branchId);
+
+        const newCell: TimetableCell = {
+          subjectName: subject.subjectName,
+          subjectShortName: subject.subjectShortName,
+          teacherName: subject.teacherName,
+          duration: subject.duration,
+          isLab: subject.isLab,
+          isCombined: false,
+          combinedBranches: [],
+          isLabContinuation: false,
+          branchId,
+          branchShortName: branch?.shortName,
+          labRoomName,
+          labRoomShortName,
+          color: state.subjectColors[subject.subjectName] || undefined,
+        };
+
+        const targetGrid = grid[branchId];
+
+        // Helper function to safely clear overwritten cells
+        const clearCell = (d: number, p: number) => {
+          const existing = targetGrid[d][p];
+          if (!existing) return;
+          
+          if (existing.isLabContinuation && p > 0) {
+             targetGrid[d][p - 1] = null; // Clear the start
+          }
+          if (existing.duration === 2 && !existing.isLabContinuation && p + 1 < targetGrid[d].length) {
+             targetGrid[d][p + 1] = null; // Clear the continuation
+          }
+        };
+
+        if (subject.duration === 1) {
+          clearCell(day, period);
+          targetGrid[day][period] = newCell;
+          
+        } else if (subject.duration === 2) {
+          const nextPeriod = period + 1;
+          // Prevent out of bounds
+          if (nextPeriod >= targetGrid[day].length) return; 
+
+          // Clear current and next period if they contain classes
+          clearCell(day, period);
+          // If the next cell was cleared by clearing the first, this is safe to run again
+          clearCell(day, nextPeriod); 
+
+          targetGrid[day][period] = newCell;
+          targetGrid[day][nextPeriod] = { ...newCell, isLabContinuation: true };
+        }
+
+        set({ generatedTimetables: grid });
+      },
+
+      removeManualSubject: (branchId, day, period) => {
+        // Placeholder implementation for future deletion functionality
+        console.warn(`removeSubject placeholder invoked for branch ${branchId}, Day: ${day}, Period: ${period}`);
+      },
     }),
     {
       name: 'timeforge-storage',

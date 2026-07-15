@@ -91,18 +91,23 @@ export function generateTimetables(
     confirmed?: boolean
   ): TimetableCell {
     return {
-      subjectName: name,
-      subjectShortName: shortName,
-      teacherName: teacher,
-      isLab,
-      isCombined,
-      combinedBranches,
-      isLabContinuation: isContinuation,
-      labRoomName: labRoom?.name,
-      labRoomShortName: labRoom?.shortName,
-      color: color || subjectColors[name],
-      isConfirmed: confirmed || false,
-    };
+  subjectName: name,
+  subjectShortName: shortName,
+  teacherName: teacher,
+
+  duration: isLab ? 2 : 1,
+
+  isLab,
+  isCombined,
+  combinedBranches,
+  isLabContinuation: isContinuation,
+
+  labRoomName: labRoom?.name,
+  labRoomShortName: labRoom?.shortName,
+
+  color: color || subjectColors[name],
+  isConfirmed: confirmed || false,
+};
   }
 
   // ─── 0) Place confirmed / fixed classes first ───

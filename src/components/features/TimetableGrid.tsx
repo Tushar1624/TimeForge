@@ -3,6 +3,9 @@ import { parseTime, formatTime, cn } from '@/lib/utils';
 import { CELL_COLOR_MAP, getSubjectColorIndex } from '@/constants/config';
 import { FlaskConical, Users, GripVertical, Pin } from 'lucide-react';
 import { useState, useCallback } from 'react';
+import EditClassDialog from './EditClassDialog';
+import AssignSubjectDialog from './AssignSubjectDialog'; // <-- Added Import
+import { useTimetableStore } from '@/stores/timetableStore';
 
 interface TimetableGridProps {
   grid: (TimetableCell | null)[][];
@@ -46,16 +49,44 @@ export default function TimetableGrid({ grid, config, branchName, branchId, enab
 
   const [dragSource, setDragSource] = useState<{ day: number; period: number } | null>(null);
   const [dragOver, setDragOver] = useState<{ day: number; period: number } | null>(null);
+  
+  const updateClass = useTimetableStore((s) => s.updateClass);
+  const getRemainingSubjects = useTimetableStore((s) => s.getRemainingSubjects); // <-- Added Store Fetch
+  const assignSubject = useTimetableStore((s) => s.assignSubject); // <-- Added Store Action
+
+  const [editingCell, setEditingCell] = useState<TimetableCell | null>(null);
+  const [editingPosition, setEditingPosition] = useState<{ day: number; period: number; } | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+
+  // --- NEW ASSIGN SUBJECT STATES ---
+  const [showAssignEditor, setShowAssignEditor] = useState(false);
+  const [assignPosition, setAssignPosition] = useState<{ day: number; period: number } | null>(null);
+
+  const openEditor = (day: number, period: number, cell: TimetableCell) => {
+    setEditingCell(cell);
+    setEditingPosition({ day, period });
+    setShowEditor(true);
+  };
+
+  const openAssignEditor = (day: number, period: number) => {
+    setAssignPosition({ day, period });
+    setShowAssignEditor(true);
+  };
 
   const instructions: RenderInstruction[][] = [];
   for (let d = 0; d < numDays; d++) {
     instructions[d] = [];
     for (let p = 0; p < numPeriods; p++) {
       const cell = grid[d]?.[p] ?? null;
-      if (!cell) instructions[d][p] = { type: 'empty' };
-      else if (cell.isLab && !cell.isLabContinuation) instructions[d][p] = { type: 'lab-start', cell };
-      else if (cell.isLabContinuation) instructions[d][p] = { type: 'lab-continuation' };
-      else instructions[d][p] = { type: 'normal', cell };
+      if (!cell) {
+        instructions[d][p] = { type: 'empty' };
+      } else if (cell.duration === 2 && !cell.isLabContinuation) {
+        instructions[d][p] = { type: 'lab-start', cell };
+      } else if (cell.isLabContinuation) {
+        instructions[d][p] = { type: 'lab-continuation' };
+      } else {
+        instructions[d][p] = { type: 'normal', cell };
+      }
     }
   }
 
@@ -110,7 +141,11 @@ export default function TimetableGrid({ grid, config, branchName, branchId, enab
         {cell.labRoomShortName && !compact && <span className="text-[9px] text-secondary/70 font-display truncate">🧪 {cell.labRoomShortName}</span>}
         {cell.isCombined && cell.combinedBranches.length > 0 && !compact && <span className="text-[9px] text-sky-400/70 truncate">{cell.combinedBranches.join('+')}</span>}
         {cell.branchShortName && !compact && <span className="text-[9px] text-primary/60 font-display truncate">{cell.branchShortName}</span>}
-        {isLabSpan && !compact && <span className="text-[9px] text-secondary/60 font-display">2 Periods</span>}
+        {cell.duration === 2 && !compact && (
+          <span className="text-[9px] text-secondary/60 font-display">
+              2 Periods
+          </span>
+        )}
       </div>
     );
   }
@@ -144,13 +179,23 @@ export default function TimetableGrid({ grid, config, branchName, branchId, enab
                   const cols: React.ReactNode[] = [];
                   if (p === config.recessAfterPeriod) cols.push(<td key={`recess-${d}`} className="bg-secondary/10 px-1 py-1 text-center w-10" />);
                   const inst = instructions[d]?.[p];
+                  
+                  // Empty Cells and Lab Continuations
                   if (!inst || inst.type === 'lab-continuation') {
                     if (inst?.type === 'lab-continuation') return cols.length > 0 ? cols : null;
-                    cols.push(<td key={`${d}-${p}`} className={cn('p-1 align-middle surface-low transition-all', isDragTarget(d, p) && 'ring-2 ring-primary ring-inset bg-primary/10')}
-                      {...(enableDrag ? { onDragOver: (e: React.DragEvent) => handleDragOver(d, p, e), onDragLeave: handleDragLeave, onDrop: (e: React.DragEvent) => handleDrop(d, p, e) } : {})}>
-                      <div className="h-full min-h-[40px] flex items-center justify-center"><span className="text-[10px] text-muted-foreground/20">—</span></div></td>);
+                    cols.push(
+                      <td 
+                        key={`${d}-${p}`} 
+                        onDoubleClick={() => openAssignEditor(d, p)} // <-- ADDED DOUBLE CLICK
+                        className={cn('p-1 align-middle surface-low transition-all cursor-pointer hover:bg-secondary/10', isDragTarget(d, p) && 'ring-2 ring-primary ring-inset bg-primary/10')}
+                        {...(enableDrag ? { onDragOver: (e: React.DragEvent) => handleDragOver(d, p, e), onDragLeave: handleDragLeave, onDrop: (e: React.DragEvent) => handleDrop(d, p, e) } : {})}
+                      >
+                        <div className="h-full min-h-[40px] flex items-center justify-center"><span className="text-[10px] text-muted-foreground/20">—</span></div>
+                      </td>
+                    );
                     return cols;
                   }
+                  
                   const isDragging = isDragSourceCell(d, p);
                   const isTarget = isDragTarget(d, p);
                   const isConfirmed = (inst.type === 'normal' || inst.type === 'lab-start') && inst.cell.isConfirmed;
@@ -158,14 +203,25 @@ export default function TimetableGrid({ grid, config, branchName, branchId, enab
                   const dropProps = enableDrag ? { onDragOver: (e: React.DragEvent) => handleDragOver(d, p, e), onDragLeave: handleDragLeave, onDrop: (e: React.DragEvent) => handleDrop(d, p, e) } : {};
 
                   if (inst.type === 'lab-start') {
-                    cols.push(<td key={`${d}-${p}`} colSpan={2} className={cn('p-1 align-middle surface-low print-cell-lab transition-all', isDragging && 'opacity-40 scale-95', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10', enableDrag && !isConfirmed && 'cursor-grab active:cursor-grabbing', isConfirmed && 'cursor-not-allowed')} {...dragProps} {...dropProps}>{renderCell(inst.cell, true)}</td>);
+                    cols.push(<td key={`${d}-${p}`} colSpan={2} onDoubleClick={() => openEditor(d, p, inst.cell)} className={cn('p-1 align-middle surface-low print-cell-lab transition-all', isDragging && 'opacity-40 scale-95', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10', enableDrag && !isConfirmed && 'cursor-grab active:cursor-grabbing', isConfirmed && 'cursor-not-allowed')} {...dragProps} {...dropProps}>{renderCell(inst.cell, true)}</td>);
                     return cols;
                   }
                   if (inst.type === 'normal') {
-                    cols.push(<td key={`${d}-${p}`} className={cn('p-1 align-middle surface-low print-cell-normal transition-all', isDragging && 'opacity-40 scale-95', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10', enableDrag && !isConfirmed && 'cursor-grab active:cursor-grabbing', isConfirmed && 'cursor-not-allowed')} {...dragProps} {...dropProps}>{renderCell(inst.cell, false)}</td>);
+                    cols.push(<td key={`${d}-${p}`} onDoubleClick={() => openEditor(d, p, inst.cell)} className={cn('p-1 align-middle surface-low print-cell-normal transition-all', isDragging && 'opacity-40 scale-95', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10', enableDrag && !isConfirmed && 'cursor-grab active:cursor-grabbing', isConfirmed && 'cursor-not-allowed')} {...dragProps} {...dropProps}>{renderCell(inst.cell, false)}</td>);
                     return cols;
                   }
-                  cols.push(<td key={`${d}-${p}`} className={cn('p-1 align-middle surface-low transition-all', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10')} {...dropProps}><div className="h-full min-h-[40px] flex items-center justify-center"><span className="text-[10px] text-muted-foreground/20">—</span></div></td>);
+                  
+                  // Fallback Empty Cell
+                  cols.push(
+                    <td 
+                      key={`${d}-${p}`} 
+                      onDoubleClick={() => openAssignEditor(d, p)} // <-- ADDED DOUBLE CLICK
+                      className={cn('p-1 align-middle surface-low transition-all cursor-pointer hover:bg-secondary/10', isTarget && 'ring-2 ring-primary ring-inset bg-primary/10')} 
+                      {...dropProps}
+                    >
+                      <div className="h-full min-h-[40px] flex items-center justify-center"><span className="text-[10px] text-muted-foreground/20">—</span></div>
+                    </td>
+                  );
                   return cols;
                 })}
               </tr>
@@ -173,6 +229,46 @@ export default function TimetableGrid({ grid, config, branchName, branchId, enab
           </tbody>
         </table>
       </div>
+
+      <EditClassDialog
+        open={showEditor}
+        cell={editingCell}
+        onClose={() => setShowEditor(false)}
+        onSave={(updates) => {
+            if (!editingPosition || !branchId || !editingCell) return;
+            updateClass(
+                branchId,
+                editingPosition.day,
+                editingPosition.period,
+                updates,
+                updates.duration ?? editingCell.duration
+            );
+            setShowEditor(false);
+        }}
+      />
+
+      {/* --- ADDED ASSIGN DIALOG COMPONENT --- */}
+      {branchId && (
+        <AssignSubjectDialog
+          open={showAssignEditor}
+          branchId={branchId}
+          remainingSubjects={getRemainingSubjects(branchId)}
+          onClose={() => setShowAssignEditor(false)}
+          onAssign={(subject, labRoomName, labRoomShortName) => {
+            if (assignPosition) {
+              assignSubject(
+                branchId, 
+                assignPosition.day, 
+                assignPosition.period, 
+                subject, 
+                labRoomName, 
+                labRoomShortName
+              );
+            }
+            setShowAssignEditor(false);
+          }}
+        />
+      )}
     </div>
   );
 }

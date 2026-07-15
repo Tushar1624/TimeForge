@@ -88,15 +88,23 @@ export interface TimetableCell {
   subjectName: string;
   subjectShortName: string;
   teacherName: string;
+
+  // Duration of this class
+  duration: 1 | 2;
+
   isLab: boolean;
   isCombined: boolean;
   combinedBranches: string[];
   isLabContinuation: boolean;
+
   isConfirmed?: boolean;
+
   branchId?: string;
   branchShortName?: string;
+
   labRoomName?: string;
   labRoomShortName?: string;
+
   color?: string;
 }
 
@@ -138,5 +146,15 @@ export const SUBJECT_PALETTE = [
   '#0d9488', '#d97706', '#e11d48', '#7c3aed', '#059669',
   '#0284c7', '#c026d3', '#ea580c', '#4f46e5', '#65a30d',
   '#0891b2', '#db2777', '#9333ea', '#16a34a', '#2563eb',
-  '#e5383b', '#f97316', '#06b6d4', '#8b5cf6', '#84cc16',
+  'rgb(229, 56, 59)', '#f97316', '#06b6d4', '#8b5cf6', '#84cc16',
 ];
+export interface RemainingSubject {
+  id: string;
+  subjectName: string;
+  subjectShortName: string;
+  teacherName: string;
+  duration: 1 | 2;
+  isLab: boolean;
+  preferredLabType?: LabType;
+  remaining: number;
+}
